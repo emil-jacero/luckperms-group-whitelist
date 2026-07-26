@@ -12,6 +12,8 @@ import com.velocitypowered.api.plugin.annotation.DataDirectory;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
 import com.velocitypowered.api.proxy.server.RegisteredServer;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 import net.luckperms.api.LuckPermsProvider;
 import net.luckperms.api.model.user.User;
 import net.luckperms.api.node.NodeType;
@@ -27,7 +29,7 @@ import java.util.stream.Collectors;
 
 @Plugin(id = "luckpermsgroupwhitelist",
         name = "Luckperms Group Whitelist",
-        version = "0.2.0",
+        version = "0.3.0",
         url = "https://github.com/emil-jacero/luckperms-group-whitelist",
         description = "Only allow a certain luckperms group to join a server ",
         authors = {"AI-nsley69", "Ampflower", "emil-jacero"},
@@ -41,9 +43,16 @@ public class LuckpermsGroupWhitelist {
     // Example: LPGW_SERVERS="smp=fox,keeper,elder,warden;dungeons=fox,keeper,elder,warden"
     private static final String ENV_SERVERS = "LPGW_SERVERS";
 
+    // Reason shown to a denied player - a kick screen on an initial connection, a
+    // chat line on a server switch. Override with LPGW_DENY_MESSAGE.
+    private static final String ENV_DENY_MESSAGE = "LPGW_DENY_MESSAGE";
+    private static final String DEFAULT_DENY_MESSAGE =
+            "You are not whitelisted here. Link your Discord account to gain access.";
+
     private final ProxyServer server;
     private final Logger logger;
     private final Path dataDirectory;
+    private final Component denyMessage;
 
     private final HashMap<String, List<String>> allowedGroupLookup = new HashMap<>();
 
@@ -53,6 +62,10 @@ public class LuckpermsGroupWhitelist {
         this.server = server;
         this.logger = logger;
         this.dataDirectory = dataDirectory;
+
+        String m = System.getenv(ENV_DENY_MESSAGE);
+        this.denyMessage = Component.text(
+                (m == null || m.isBlank()) ? DEFAULT_DENY_MESSAGE : m, NamedTextColor.RED);
 
         readConfig();
     }
@@ -190,5 +203,16 @@ public class LuckpermsGroupWhitelist {
         }
 
         event.setResult(ServerPreConnectEvent.ServerResult.denied());
+
+        // denied() only cancels the backend connection. On an INITIAL connection
+        // (no current server) that leaves the player in limbo until the client
+        // times out ("joining world..."), so disconnect them with a clear reason
+        // instead. On a server SWITCH (already on a backend) the deny keeps them
+        // where they are, so send the reason to chat rather than kicking them.
+        if (player.getCurrentServer().isEmpty()) {
+            player.disconnect(denyMessage);
+        } else {
+            player.sendMessage(denyMessage);
+        }
     }
 }
